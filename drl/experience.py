@@ -6,10 +6,28 @@ import numpy as np
 import torch
 
 from collections import namedtuple, deque
+from typing import Tuple, List
 
 from .agent import BaseAgent
 
 Experience = namedtuple("Experience", ['state', 'action', 'reward', 'done', 'last_state'])
+
+def unpack_data (exps: List[Experience]) -> Tuple:
+    states, actions, rewards, dones, next_states = [], [], [], [], []
+    for exp in exps:
+        states.append(np.array(exp.state))
+        actions.append(exp.action)
+        rewards.append(exp.reward)
+        dones.append(exp.done)
+        next_states.append(np.array(exp.last_state))
+
+    states = np.array(states, copy=False)
+    actions = np.array(actions)
+    rewards = np.array(rewards, dtype=np.float32)
+    dones = np.array(dones, dtype=np.uint8)
+    next_states = np.array(next_states, copy=False)
+    
+    return states, actions, rewards, dones, next_states
 
 class ReplayBuffer:
     def __init__ (self, capacity: int):
@@ -26,15 +44,9 @@ class ReplayBuffer:
             indices = np.random.choice(len(self.buffer), batch_size, replace=False)
             sample = [self.buffer[idx] for idx in indices]
 
-        states, actions, rewards, dones, next_states = zip (*sample)
-        
-        states = np.array(states)
-        actions = np.array(actions)
-        rewards = np.array(rewards, dtype=np.float32)
-        dones = np.array(dones, dtype=np.uint8)
-        next_states = np.array(next_states)
+        sample = unpack_data(sample)
 
-        return states, actions, rewards, dones, next_states
+        return sample
     
     def append (self, exp: Experience):
         self.buffer.append(exp)

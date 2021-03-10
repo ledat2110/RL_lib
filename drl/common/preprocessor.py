@@ -4,9 +4,11 @@ import numpy as np
 
 class Preprocessor:
     @staticmethod
-    def default_tensor (states: np.ndarray):
-        return torch.tensor([states])
+    def default_tensor (states):
+        state =  np.expand_dims(states, 0)
+        return torch.tensor(state)
 
     @staticmethod
-    def float32_tensor (states: np.ndarray):
-        return torch.tensor([states], dtype=torch.float32)
+    def float32_tensor (states):
+        state =  np.expand_dims(states, 0)
+        return torch.tensor(state, dtype=torch.float32)

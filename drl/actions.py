@@ -53,11 +53,11 @@ class EpsilonTracker:
 
     def decay_eps (self, step: int):
         if self.lin:
-            decay_ratio = (1 - step/self.decay_steps)
+            decay_ratio = step / self.decay_steps
         else:
             step = max(step, 1)
-            decay_ratio = (1 - math.log(step, self.decay_steps))
-        eps = (self.eps_start - self.eps_end) * decay_ratio + self.eps_end
+            decay_ratio = math.log(step, self.decay_steps)
+        eps = self.eps_start - (self.eps_start - self.eps_end) * decay_ratio
         eps = max(eps, self.eps_end)
 
         self.selector.epsilon = eps
