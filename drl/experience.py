@@ -39,17 +39,71 @@ class ReplayBuffer:
 
     def sample(self, batch_size: int):
         if len(self.buffer) <= batch_size:
-            sample = self.buffer
+            samples = self.buffer
         else:
             indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-            sample = [self.buffer[idx] for idx in indices]
+            samples = [self.buffer[idx] for idx in indices]
 
-        sample = unpack_data(sample)
+        samples = unpack_data(samples)
 
-        return sample
+        return samples
     
     def append (self, exp: Experience):
         self.buffer.append(exp)
+
+class PrioReplayBuffer:
+    def __init__ (self, capacity: int, prob_alpha: float=0.6, beta: float=0.4):
+        self.priorities = np.zeros((capacity, ), dtype=np.float32)
+        self.buffer = []
+        self.pos = 0
+        self.prob_alpha = prob_alpha
+        self.capacity = capacity
+        self.beta = beta
+
+    def __len__ (self):
+        return len(self.buffer)
+
+    def append(self, exp: Experience):
+        max_prio = self.priorities.max() if self.buffer else 1.0
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(exp)
+        else:
+            self.buffer[self.pos] = exp
+        self.priorities[self.pos] = max_prio
+        self.pos = (self.pos + 1) % self.capacity
+
+    def sample(self, batch_size: int):
+        total = len(self.buffer)
+        probs = self.priorities[:total] ** self.prob_alpha
+        probs /= probs.sum()
+
+        if total <= batch_size:
+            indices = np.array(range(total))
+        else:
+            indices = np.random.choice(total, batch_size, p=probs, replace=False)
+        samples = [self.buffer[idx] for idx in indices]
+
+        weights = (total * probs[indices]) ** (-self.beta)
+        weights /= weights.max()
+
+        samples = unpack_data(samples)
+
+        return samples, indices, np.array(weights, dtype=np.float32)
+
+    def update_priorities (self, batch_indices: np.ndarray, batch_priorities: np.ndarray):
+        for idx, prio in zip(batch_indices, batch_priorities):
+            self.priorities[idx] = prio
+
+class BetaTracker:
+    def __init__ (self, buffer: PrioReplayBuffer, beta_start: float, beta_frames: int):
+        self.buffer = buffer
+        self.beta_start = beta_start
+        self.beta_frames = beta_frames
+
+    def update_beta (self, step: int):
+        beta = self.beta_start + (1 - self.beta_start) * step / self.beta_frames
+        beta = min(1.0, beta)
+        self.buffer.beta = beta
 
 class ExperienceSource:
     """
