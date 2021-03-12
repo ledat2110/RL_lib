@@ -1,7 +1,7 @@
 import setuptools
 
 
-requirements = ['torch==1.7.1', 'gym', 'atari-py', 'numpy', 'opencv-python']
+requirements = ['torch==1.8.0', 'gym', 'atari-py', 'numpy', 'opencv-python']
 
 
 setuptools.setup(
