@@ -36,8 +36,8 @@ class DQNAgent (BaseAgent):
     DQNAgent is a memoryless DQN agent which calculates Q values
     from the observations and  converts them into the actions using action_selector
     """
-    def __init__ (self, dqn_model: nn.Module, action_selector: actions.ActionSelector, device="cpu", preprocessor=Preprocessor.default_tensor):
-        self.dqn_model = dqn_model
+    def __init__ (self, model: nn.Module, action_selector: actions.ActionSelector, device="cpu", preprocessor=Preprocessor.default_tensor):
+        self.model = model
         self.action_selector = action_selector
         self.preprocessor = preprocessor
         self.device = device
@@ -49,7 +49,7 @@ class DQNAgent (BaseAgent):
         if torch.is_tensor(state):
             state = state.to(self.device)
         
-        q_v = self.dqn_model(state)
+        q_v = self.model(state)
         q = q_v.squeeze(0).data.cpu().numpy()
         actions = self.action_selector(q)
 
