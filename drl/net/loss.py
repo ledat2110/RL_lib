@@ -37,6 +37,6 @@ class DQNLoss (Loss):
             next_s_vals = next_s_vals.detach()
 
         expected_sa_vals = next_s_vals * self.gamma + rewards_v
-        loss = nn.MSELoss(sa_vals, expected_sa_vals)
+        loss = nn.MSELoss()(sa_vals, expected_sa_vals)
 
         return loss
