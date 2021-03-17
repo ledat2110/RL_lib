@@ -176,6 +176,8 @@ class ExperienceSource:
         else:
             self.state = next_state
 
+        return exp
+
     def sample (self, batch_size: int, initial_size: int):
         for _ in range(initial_size):
             self.play_steps()
