@@ -21,9 +21,11 @@ class Tracker:
 
     def _lin_update (self, step: int):
         self.val = self.start_val - (self.start_val - self.end_val) * step / self.steps
+        self.val = max(self.val, self.end_val)
 
     def _exp_update (self, step: int):
         self.val = self.start_val - (self.start_val - self.end_val) * math.log(step, self.steps)
+        self.val = max(self.val, self.end_val)
 
 class EpsilonTracker (Tracker):
     def __init__ (self, selector: actions.EpsilonGreedySelector, start_val: float, end_val: float, steps: int, lin: bool=True):
