@@ -11,6 +11,7 @@ from typing import Tuple, List
 from .agent import BaseAgent
 
 Experience = namedtuple("Experience", ['state', 'action', 'reward', 'done', 'last_state'])
+EpisodeEnded = namedtuple("EpisodeEnded", field_names=['reward', 'step'])
 
 def unpack_data (exps: List[Experience]) -> Tuple:
     states, actions, rewards, dones, next_states = [], [], [], [], []
@@ -50,6 +51,10 @@ class ReplayBuffer:
     
     def append (self, exp: Experience):
         self.buffer.append(exp)
+
+    @property
+    def size (self):
+        return self.buffer.maxlen
 
 class PrioReplayBuffer:
     def __init__ (self, capacity: int, prob_alpha: float=0.6, beta: float=0.4):
@@ -111,7 +116,7 @@ class ExperienceSource:
 
     Every experience contains n list of Experience entries
     """
-    def __init__ (self, env: gym.Env, agent: BaseAgent, buffer: ReplayBuffer, steps_count: int=2, gamma: float=0.99):
+    def __init__ (self, env: gym.Env, agent: BaseAgent, buffer: ReplayBuffer=None, steps_count: int=2, gamma: float=0.99):
         """
         Create simple experience source
         :param env: environment to be used
@@ -167,7 +172,8 @@ class ExperienceSource:
             reward += r
 
         exp = Experience(self.state, actions[0], reward, done, next_state)
-        self.buffer.append(exp)
+        if self.buffer is not None:
+            self.buffer.append(exp)
 
         if done:
             self.total_reward = self.cur_reward
@@ -178,13 +184,11 @@ class ExperienceSource:
 
         return exp
 
-    def sample (self, batch_size: int, initial_size: int):
-        for _ in range(initial_size):
-            self.play_steps()
+    def __iter__ (self):
         while True:
-            self.play_steps()
-            yield self.buffer.sample(batch_size)
-        
+            exp = self.play_steps()
+            yield exp
+
     def reward_step (self):
         res = (self.total_reward, self.total_step)
         self.total_reward = None

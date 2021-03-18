@@ -15,7 +15,7 @@ class Loss:
         raise NotImplementedError
 
 class DQNLoss (Loss):
-    def __init__ (self, net: nn.Module, tgt_net: nn.Module, gamma: float, device: str):
+    def __init__ (self, net: nn.Module, tgt_net: nn.Module, gamma: float, device: str="cpu"):
         super(DQNLoss, self).__init__(device)
         self.net = net
         self.tgt_net = tgt_net
