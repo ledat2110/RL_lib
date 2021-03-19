@@ -1,5 +1,9 @@
 import math
+import time
+import sys
+import numpy as np
 
+from tensorboardX import SummaryWriter
 from typing import List
 
 from . import actions
@@ -47,3 +51,44 @@ class BetaTracker (Tracker):
     def update (self, step: int):
         super(BetaTracker, self).update(step)
         self.p_buffer.beta = self.val
+
+class RewardTracker:
+    def __init__ (sefl, writer: SummaryWriter, stop_reward: float):
+        assert isinstance(writer, SummaryWriter)
+        self.writer = writer
+        self.stop_reward = stop_reward
+
+    def __enter__ (self):
+        self.ts = time.time()
+        self.eps_ts = time.time()
+        self.ts_frame = 0
+        self.total_reward = []
+        return self
+
+    def __exit__ (self):
+        self.writer.close()
+
+    def update (self, reward, frame, epsilon=None):
+        self.total_reward.append(reward)
+        m_reward = np.mean(self.total_reward[-100:])
+
+        now = time.time()
+        speed = (frame - self.ts_frame) / (self.eps_ts - now)
+        elapsed = now - self.ts
+
+        self.ts_frame = frame
+        self.eps_ts = now
+
+        print("Episode: %d, Reward: %6.3f, Speed: %6.3f, Epsilon: %s, Elapsed: %.3f" % (len(self.total_reward), m_reward, speed, epsilon, elapsed))
+        sys.stdout.flush()
+
+        if epsilon is not None:
+            self.writer.add_scalar("epsilon", epsilon, frame)
+        self.writer.add_scalar("speed", speed, frame)
+        self.writer.add_scalar("reward", m_reward, frame)
+
+        if m_reward > self.stop_reward:
+            print("Solved in %d steps and %d episodes"%(frame, len(self.total_reward)))
+            return True
+
+        return False
