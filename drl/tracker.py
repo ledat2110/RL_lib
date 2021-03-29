@@ -53,7 +53,7 @@ class BetaTracker (Tracker):
         self.p_buffer.beta = self.val
 
 class RewardTracker:
-    def __init__ (sefl, writer: SummaryWriter, stop_reward: float):
+    def __init__ (self, writer: SummaryWriter, stop_reward: float):
         assert isinstance(writer, SummaryWriter)
         self.writer = writer
         self.stop_reward = stop_reward
@@ -73,7 +73,7 @@ class RewardTracker:
         m_reward = np.mean(self.total_reward[-100:])
 
         now = time.time()
-        speed = (frame - self.ts_frame) / (self.eps_ts - now)
+        speed = (frame - self.ts_frame) / (now - self.eps_ts)
         elapsed = now - self.ts
 
         self.ts_frame = frame

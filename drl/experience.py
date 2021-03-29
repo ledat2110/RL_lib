@@ -33,6 +33,7 @@ def unpack_data (exps: List[Experience]) -> Tuple:
 class ReplayBuffer:
     def __init__ (self, capacity: int):
         assert isinstance(capacity, int)
+        self.capacity = capacity
         self.buffer = collections.deque(maxlen=capacity)
     
     def __len__ (self):
@@ -54,7 +55,7 @@ class ReplayBuffer:
 
     @property
     def size (self):
-        return self.buffer.maxlen
+        return self.capacity
 
 class PrioReplayBuffer:
     def __init__ (self, capacity: int, prob_alpha: float=0.6, beta: float=0.4):
@@ -99,16 +100,6 @@ class PrioReplayBuffer:
         for idx, prio in zip(batch_indices, batch_priorities):
             self.priorities[idx] = prio
 
-class BetaTracker:
-    def __init__ (self, buffer: PrioReplayBuffer, beta_start: float, beta_frames: int):
-        self.buffer = buffer
-        self.beta_start = beta_start
-        self.beta_frames = beta_frames
-
-    def update_beta (self, step: int):
-        beta = self.beta_start + (1 - self.beta_start) * step / self.beta_frames
-        beta = min(1.0, beta)
-        self.buffer.beta = beta
 
 class ExperienceSource:
     """
@@ -153,7 +144,7 @@ class ExperienceSource:
         for _ in range(self.steps_count):
             action = self.agent(state)
             next_state, reward, done, _ = self.env.step(action)
-            
+
             self.cur_reward += reward
             self.cur_step += 1
 
@@ -163,7 +154,7 @@ class ExperienceSource:
             if done:        
                 next_state = state
                 break
-        
+
             state = next_state
 
         reward = 0
@@ -196,3 +187,46 @@ class ExperienceSource:
 
         return res
 
+
+class MultiExpSource:
+    def __init__ (self, envs: List[gym.Env], agent: BaseAgent, buffer: ReplayBuffer=None, steps_count: int=2, gamma: float=0.99):
+        assert isinstance(agent, BaseAgent)
+        assert isinstance(steps_count, int)
+        assert steps_count >= 1
+
+        self.exp_sources = []
+        for env in envs:
+            exp_source = ExperienceSource(env, agent, buffer, steps_count, gamma)
+            self.exp_sources.append(exp_source)
+
+        self.total_rewards = []
+        self.total_steps = []
+
+        self.reset()
+
+    def reset (self):
+        for exp_source in self.exp_sources:
+            exp_source.reset()
+
+    def play_steps (self):
+        for exp_source in self.exp_sources:
+            exp = exp_source.play_steps()
+            yield exp
+
+    def __iter__ (self):
+        while True:
+            for exp_source in self.exp_sources:
+                exp = exp_source.play_steps()
+                yield exp
+
+    def reward_step (self):
+        for exp_source in self.exp_sources:
+            reward, step = exp_source.reward_step()
+            self.total_rewards.append(reward)
+            self.total_steps.append(step)
+
+        res = (self.total_rewards.copy(), self.total_steps.copy)
+        self.total_rewards.clear()
+        self.total_steps.clear()
+
+        return res
