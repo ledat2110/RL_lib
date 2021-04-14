@@ -4,7 +4,7 @@ os.environ.setdefault('PATH', '')
 from collections import deque
 import gym
 from gym import spaces
-
+import cv2
 
 USE_PIL = True
 if USE_PIL:
@@ -370,4 +370,49 @@ def wrap_deepmind(env, episode_life=True, clip_rewards=True,
         env = ClipRewardEnv(env)
     if frame_stack:
         env = FrameStack(env, frame_stack_count)
+    return env
+
+class ProcessFrame84(gym.ObservationWrapper):
+    def __init__(self, env=None):
+        super(ProcessFrame84, self).__init__(env)
+        self.observation_space = spaces.Box(low=0, high=255, shape=(84, 84, 1), dtype=np.uint8)
+
+    def observation(self, obs):
+        return ProcessFrame84.process(obs)
+
+    @staticmethod
+    def process(frame):
+        #if frame.size == 210 * 160 * 3:
+        #    img = np.reshape(frame, [210, 160, 3]).astype(np.float32)
+        #elif frame.size == 250 * 160 * 3:
+        #    img = np.reshape(frame, [250, 160, 3]).astype(np.float32)
+        #else:
+        #    assert False, "Unknown resolution."
+        #img = img[:, :, 0] * 0.299 + img[:, :, 1] * 0.587 + img[:, :, 2] * 0.114
+        img = np.reshape(frame, [-1, 3]).astype(np.float32)
+        img = img[:, 0] * 0.299 + img[:, 1] * 0.587 + img[:, 2] * 0.114
+        resized_screen = cv2.resize(img, (84, 110), interpolation=cv2.INTER_AREA)
+        x_t = resized_screen[18:102, :]
+        x_t = np.reshape(x_t, [84, 84, 1])
+        return x_t.astype(np.uint8)
+
+class ClippedRewardsWrapper(gym.RewardWrapper):
+    def reward(self, reward):
+        """Change all the positive rewards to 1, negative to -1 and keep zero."""
+        return np.sign(reward)
+
+def wrap_dqn(env, stack_frames=4, episodic_life=True, reward_clipping=True):
+    """Apply a common set of wrappers for Atari games."""
+    assert 'NoFrameskip' in env.spec.id
+    if episodic_life:
+        env = EpisodicLifeEnv(env)
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = ProcessFrame84(env)
+    env = ImageToPyTorch(env)
+    env = FrameStack(env, stack_frames)
+    if reward_clipping:
+        env = ClippedRewardsWrapper(env)
     return env

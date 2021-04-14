@@ -1,10 +1,13 @@
-from . import actions
+from . import action
 from . import experience
 from . import agent
 from . import tracker
 from . import net
+from . import env
+from . import utils
+from . import wrapper
 
-__all__ = ['actions', 'experience', 'agent', 'tracker', 'net']
+__all__ = ['action', 'experience', 'agent', 'tracker', 'net', 'env', 'wrapper', 'utils']
 
 # try:
 #     import ignite

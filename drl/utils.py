@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+
 import numpy as np
 import collections
 
@@ -25,3 +28,18 @@ class MeanBuffer:
     @property
     def size (self):
         return self.capacity
+
+class Preprocessor:
+    @staticmethod
+    def default_tensor (states):
+        state =  np.expand_dims(states, 0)
+        return torch.tensor(state)
+
+    @staticmethod
+    def float32_tensor (states):
+        state =  np.expand_dims(states, 0)
+        return torch.tensor(state, dtype=torch.float32)
+
+def get_conv_out_size (conv_net: nn.Module, input_shape):
+    o = conv_net(torch.zeros(1, *input_shape))
+    return int(np.prod(o.size()))
