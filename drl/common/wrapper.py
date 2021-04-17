@@ -320,22 +320,6 @@ class SkipEnv(gym.Wrapper):
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
 
-
-def make_atari(env_id, max_episode_steps=None,
-               skip_noop=False, skip_maxskip=False):
-    env = gym.make(env_id)
-    assert 'NoFrameskip' in env.spec.id
-    if not skip_noop:
-        env = NoopResetEnv(env, noop_max=30)
-    if not skip_maxskip:
-        env = MaxAndSkipEnv(env, skip=4)
-    else:
-        env = SkipEnv(env, skip=4)
-    if max_episode_steps is not None:
-        env = TimeLimit(env, max_episode_steps=max_episode_steps)
-    return env
-
-
 class ImageToPyTorch(gym.ObservationWrapper):
     """
     Change image shape to CWH
@@ -349,28 +333,6 @@ class ImageToPyTorch(gym.ObservationWrapper):
 
     def observation(self, observation):
         return np.swapaxes(observation, 2, 0)
-
-
-def wrap_deepmind(env, episode_life=True, clip_rewards=True,
-                  frame_stack=False, scale=False, pytorch_img=False,
-                  frame_stack_count=4, skip_firereset=False):
-    """Configure environment for DeepMind-style Atari.
-    """
-    if episode_life:
-        env = EpisodicLifeEnv(env)
-    if 'FIRE' in env.unwrapped.get_action_meanings():
-        if not skip_firereset:
-            env = FireResetEnv(env)
-    env = WarpFrame(env)
-    if pytorch_img:
-        env = ImageToPyTorch(env)
-    if scale:
-        env = ScaledFloatFrame(env)
-    if clip_rewards:
-        env = ClipRewardEnv(env)
-    if frame_stack:
-        env = FrameStack(env, frame_stack_count)
-    return env
 
 class ProcessFrame84(gym.ObservationWrapper):
     def __init__(self, env=None):
@@ -415,4 +377,39 @@ def wrap_dqn(env, stack_frames=4, episodic_life=True, reward_clipping=True):
     env = FrameStack(env, stack_frames)
     if reward_clipping:
         env = ClippedRewardsWrapper(env)
+    return env
+
+def wrap_deepmind(env, episode_life=True, clip_rewards=True,
+                  frame_stack=False, scale=False, pytorch_img=False,
+                  frame_stack_count=4, skip_firereset=False):
+    """Configure environment for DeepMind-style Atari.
+    """
+    if episode_life:
+        env = EpisodicLifeEnv(env)
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        if not skip_firereset:
+            env = FireResetEnv(env)
+    env = WarpFrame(env)
+    if pytorch_img:
+        env = ImageToPyTorch(env)
+    if scale:
+        env = ScaledFloatFrame(env)
+    if clip_rewards:
+        env = ClipRewardEnv(env)
+    if frame_stack:
+        env = FrameStack(env, frame_stack_count)
+    return env
+
+def make_atari(env_id, max_episode_steps=None,
+               skip_noop=False, skip_maxskip=False):
+    env = gym.make(env_id)
+    assert 'NoFrameskip' in env.spec.id
+    if not skip_noop:
+        env = NoopResetEnv(env, noop_max=30)
+    if not skip_maxskip:
+        env = MaxAndSkipEnv(env, skip=4)
+    else:
+        env = SkipEnv(env, skip=4)
+    if max_episode_steps is not None:
+        env = TimeLimit(env, max_episode_steps=max_episode_steps)
     return env

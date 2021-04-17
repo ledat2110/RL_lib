@@ -14,7 +14,7 @@ class GreedySelector (ActionSelector):
     """
     def __call__ (self, scores: np.ndarray):
         assert isinstance(scores, np.ndarray)
-        return np.argmax(scores)
+        return np.argmax(scores, axis=1)
 
 class EpsilonGreedySelector (ActionSelector):
     def __init__ (self, selector: ActionSelector=GreedySelector(), epsilon: float=1.0):
@@ -24,40 +24,23 @@ class EpsilonGreedySelector (ActionSelector):
     def __call__ (self, scores: np.ndarray):
         assert isinstance(scores, np.ndarray)
         
-        if np.random.random() < self.epsilon:
-            action = np.random.randint(scores.size)
-        else:
-            action = self.selector(scores)
-
-        return action
+        batch_size, n_actions = scores.shape
+        actions = self.selector(scores)
+        mask = np.random.random(size=batch_size) < self.epsilon
+        rand_actions = np.random.choice(n_actions, sum(mask))
+        actions[mask] = rand_actions
+        return actions
 
 
 class ProbabilityActionSelector (ActionSelector):
     """
     Converts probabilities of actions into action by sampling them
     """
-    def __call__ (self, prob: np.ndarray):
+    def __call__ (self, probs: np.ndarray):
         assert isinstance(prob, np.ndarray)
-        action = np.random.choice(len(prob), p=prob)
+
+        actions = []
+        for prob in probs:
+            actions.append(np.random.choice(len(prob), p=prob))
         
-        return action
-
-class EpsilonTracker:
-    def __init__ (self, selector: GreedySelector, eps_start: float=1.0, eps_end: float=0.01, decay_steps: int=1000, lin: bool=True):
-        self.selector = selector
-        self.eps_start = eps_start
-        self.eps_end = eps_end
-        self.decay_steps = decay_steps
-        self.lin = lin
-        self.decay_eps(0)
-
-    def decay_eps (self, step: int):
-        if self.lin:
-            decay_ratio = step / self.decay_steps
-        else:
-            step = max(step, 1)
-            decay_ratio = math.log(step, self.decay_steps)
-        eps = self.eps_start - (self.eps_start - self.eps_end) * decay_ratio
-        eps = max(eps, self.eps_end)
-
-        self.selector.epsilon = eps
+        return np.array(actions)

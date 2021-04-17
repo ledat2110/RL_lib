@@ -1,86 +1,114 @@
+"""
+Agent is something which converts states into actions and has state
+"""
 import copy
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torch.nn as nn
 
 from . import action
-from .utils import Preprocessor
 
-from typing import List
 
 class BaseAgent:
     """
     Abstract Agent interface
     """
-    def initial_state (self):
+    def initial_state(self):
         """
         Should create initial empty state for the agent. It will be called for the start of the episode
         :return: Anything agent want to remember
         """
         return None
 
-    def __call__ (self, state):
+    def __call__(self, states, agent_states):
         """
-        Convert observations and states into action to take
+        Convert observations and states into actions to take
         :param states: list of environment states to process
-        :return: tuple of action, states
+        :param agent_states: list of states with the same length as observations
+        :return: tuple of actions, states
         """
+        assert isinstance(states, list)
+        assert isinstance(agent_states, list)
+        assert len(agent_states) == len(states)
 
         raise NotImplementedError
 
 
+def default_states_preprocessor(states):
+    """
+    Convert list of states into the form suitable for model. By default we assume Variable
+    :param states: list of numpy arrays with states
+    :return: Variable
+    """
+    if len(states) == 1:
+        np_states = np.expand_dims(states[0], 0)
+    else:
+        np_states = np.array([np.array(s, copy=False) for s in states], copy=False)
+    return torch.tensor(np_states)
+ 
 
-class DQNAgent (BaseAgent):
+def float32_preprocessor(states):
+    np_states = np.array(states, dtype=np.float32)
+    return torch.tensor(np_states)
+
+
+class DQNAgent(BaseAgent):
     """
     DQNAgent is a memoryless DQN agent which calculates Q values
-    from the observations and  converts them into the action using action_selector
+    from the observations and  converts them into the actions using action_selector
     """
-    def __init__ (self, model: nn.Module, action_selector: action.ActionSelector, device="cpu", preprocessor=Preprocessor.default_tensor):
-        self.model = model
+    def __init__(self, dqn_model, action_selector, device="cpu", preprocessor=default_states_preprocessor):
+        self.dqn_model = dqn_model
         self.action_selector = action_selector
         self.preprocessor = preprocessor
         self.device = device
 
     @torch.no_grad()
-    def __call__ (self, state: np.ndarray) -> np.ndarray:
+    def __call__(self, states, agent_states=None):
+        if agent_states is None:
+            agent_states = [None] * len(states)
         if self.preprocessor is not None:
-            state = self.preprocessor(state)
-        if torch.is_tensor(state):
-            state = state.to(self.device)
-        
-        q_v = self.model(state)
-        q = q_v.squeeze(0).data.cpu().numpy()
-        action = self.action_selector(q)
+            states = self.preprocessor(states)
+            if torch.is_tensor(states):
+                states = states.to(self.device)
+        q_v = self.dqn_model(states)
+        q = q_v.data.cpu().numpy()
+        actions = self.action_selector(q)
+        return actions, agent_states
 
-        return action
 
 class TargetNet:
     """
     Wrapper around model which provides copy of it instead of trained weights
     """
-    def __init__ (self, model: nn.Module):
+    def __init__(self, model):
         self.model = model
         self.target_model = copy.deepcopy(model)
 
-    def sync (self):
+    def sync(self):
         self.target_model.load_state_dict(self.model.state_dict())
 
-    def alpha_sync (self, alpha: float):
+    def alpha_sync(self, alpha):
+        """
+        Blend params of target net with params from the model
+        :param alpha:
+        """
         assert isinstance(alpha, float)
-        assert 0.0 <= alpha <= 1.0
+        assert 0.0 < alpha <= 1.0
         state = self.model.state_dict()
         tgt_state = self.target_model.state_dict()
         for k, v in state.items():
             tgt_state[k] = tgt_state[k] * alpha + (1 - alpha) * v
-        
         self.target_model.load_state_dict(tgt_state)
 
-class PolicyAgent (BaseAgent):
+
+class PolicyAgent(BaseAgent):
     """
-    Policy agent gets action probabilities from the model and samples action from it
+    Policy agent gets action probabilities from the model and samples actions from it
     """
-    def __init__ (self, model, action_selector=action.ProbabilityActionSelector(), device="cpu", apply_softmax=False, preprocessor=Preprocessor.default_tensor):
+    # TODO: unify code with DQNAgent, as only action selector is differs.
+    def __init__(self, model, action_selector=action.ProbabilityActionSelector(), device="cpu",
+                 apply_softmax=False, preprocessor=default_states_preprocessor):
         self.model = model
         self.action_selector = action_selector
         self.device = device
@@ -88,54 +116,54 @@ class PolicyAgent (BaseAgent):
         self.preprocessor = preprocessor
 
     @torch.no_grad()
-    def __call__ (self, state: List[np.ndarray]) -> np.ndarray:
+    def __call__(self, states, agent_states=None):
+        """
+        Return actions from given list of states
+        :param states: list of states
+        :return: list of actions
+        """
+        if agent_states is None:
+            agent_states = [None] * len(states)
         if self.preprocessor is not None:
-            state = self.preprocessor(state)
-        if torch.is_tensor(state):
-            state = state.to(self.device)
-        
-        probs_v = self.model(state)
+            states = self.preprocessor(states)
+            if torch.is_tensor(states):
+                states = states.to(self.device)
+        probs_v = self.model(states)
         if self.apply_softmax:
             probs_v = F.softmax(probs_v, dim=1)
-        prob = probs_v.squeeze(0).data.cpu().numpy()
-        action = self.action_selector(prob)
+        probs = probs_v.data.cpu().numpy()
+        actions = self.action_selector(probs)
+        return np.array(actions), agent_states
 
-        return action
 
-class ContA2CAgent (BaseAgent):
-    def __init__ (self, net, device="cpu"):
-        self.net = net
+class ActorCriticAgent(BaseAgent):
+    """
+    Policy agent which returns policy and value tensors from observations. Value are stored in agent's state
+    and could be reused for rollouts calculations by ExperienceSource.
+    """
+    def __init__(self, model, action_selector=action.ProbabilityActionSelector(), device="cpu",
+                 apply_softmax=False, preprocessor=default_states_preprocessor):
+        self.model = model
+        self.action_selector = action_selector
         self.device = device
+        self.apply_softmax = apply_softmax
+        self.preprocessor = preprocessor
 
-    def __call__ (self, states):
-        states_v = Preprocessor.float32_tensor(states)
-        states_v = states_v.to(self.device)
-
-        mu_v, var_v, _ = self.net(states_v)
-        mu = mu_v.data.cpu().numpy()
-        sigma = torch.sqrt(var_v).data.cpu().numpy()
-
-        actions = np.random.normal(mu, sigma)
-        return actions
-
-class ThresholdAgent:
-    def __init__ (self, eps: np.array, Q: np.array, action_dim: int):
-        self.eps = eps
-        self.Q = Q
-        self.action_dim = action_dim
-        self.production_flag = True
-
-    def get_action (self, state: np.ndarray):
-        action = np.zeros(self.action_dim, dtype=np.int32)
-        action[0] = self.Q[0] if self.production_flag else 0
-
-        for i in range(1, self.action_dim):
-            if state[i] < self.eps[i]:
-                action[i] = self.Q[i]
-
-        return action
-
-    def set_production_level (self, state: np.ndarray, num_storages: int):
-        self.production_flag = False
-        if (state[0] - np.sum(state[1:num_storages+1])) < self.eps[0]:
-            self.production_flag = True
+    @torch.no_grad()
+    def __call__(self, states, agent_states=None):
+        """
+        Return actions from given list of states
+        :param states: list of states
+        :return: list of actions
+        """
+        if self.preprocessor is not None:
+            states = self.preprocessor(states)
+            if torch.is_tensor(states):
+                states = states.to(self.device)
+        probs_v, values_v = self.model(states)
+        if self.apply_softmax:
+            probs_v = F.softmax(probs_v, dim=1)
+        probs = probs_v.data.cpu().numpy()
+        actions = self.action_selector(probs)
+        agent_states = values_v.data.squeeze().cpu().numpy().tolist()
+        return np.array(actions), agent_states
