@@ -18,6 +18,10 @@ def cal_cont_logprob (mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: tor
 
     return p1 + p2
 
+def get_conv_out (conv_net, input_shape):
+    o = conv_net(torch.zeros(1, *input_shape))
+    return int(np.prod(o.size()))
+
 class SMAQueue:
     """
     Queue of fixed size with mean, max, min operations
