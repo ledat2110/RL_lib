@@ -7,6 +7,9 @@ import torch.distributions as distr
 
 import numpy as np
 
+import mlagents
+from mlagents_envs.environment import UnityEnvironment, ActionTuple, BaseEnv
+from typing import Deque, NamedTuple, List, Dict, Tuple
 from collections import namedtuple, deque
 
 from .agent import BaseAgent
@@ -156,6 +159,115 @@ def _group_list(items, lens):
         cur_ofs += g_len
     return res
 
+class UnityExperienceSource(ExperienceSource) :
+    def __init__(self, env, agent, steps_count=2, steps_delta=1):
+        super().__init__([], agent, steps_count=steps_count, steps_delta=steps_delta)
+        self.env = env
+            
+    def __iter__(self):
+        env = self.env
+        decision_steps, terminal_steps = env.reset()
+        # # Read and store the Behavior Name of the Environment
+        # behavior_name = list(env.behavior_specs)[0]
+        # # Read and store the Behavior Specs of the Environment
+        # spec = env.behavior_specs[behavior_name]
+
+        # Create a Mapping from AgentId to Trajectories. This will help us create
+        # trajectories for each Agents
+        dict_trajectories_from_agent: Dict[int, Deque] = {}
+        # Create a Mapping from AgentId to the last observation of the Agent
+        dict_last_obs_from_agent: Dict[int, np.ndarray] = {}
+        # Create a Mapping from AgentId to the last observation of the Agent
+        dict_last_action_from_agent: Dict[int, np.ndarray] = {}
+        # Create a Mapping from AgentId to cumulative reward (Only for reporting)
+        dict_cumulative_reward_from_agent: Dict[int, float] = {}
+        # Create a list to store the cumulative steps obtained so far
+        dict_cumulative_steps_from_agent: Dict[int, int] = {}
+
+        iter_idx = 0
+        while True: 
+            # Get the Decision Steps and Terminal Steps of the Agents
+            # decision_steps, terminal_steps = env.get_steps(behavior_name)
+            
+            # For all Agents with a Terminal Step:
+            for agent_id_terminated in terminal_steps:
+            # Create its last experience (is last because the Agent terminated)
+                last_experience = Experience(
+                    state=dict_last_obs_from_agent[agent_id_terminated].copy(),
+                    reward=terminal_steps[agent_id_terminated].reward,
+                    done=not terminal_steps[agent_id_terminated].interrupted,
+                    action=dict_last_action_from_agent[agent_id_terminated].copy(),
+                    # next_obs=terminal_steps[agent_id_terminated].obs[0],
+                    )
+                # Clear its last observation and action (Since the trajectory is over)
+                dict_last_obs_from_agent.pop(agent_id_terminated)
+                dict_last_action_from_agent.pop(agent_id_terminated)
+                # Report the cumulative reward
+                cumulative_reward = (
+                    dict_cumulative_reward_from_agent[agent_id_terminated]
+                    + terminal_steps[agent_id_terminated].reward
+                )
+                self.total_rewards.append(cumulative_reward)
+                self.total_steps.append(dict_cumulative_steps_from_agent[agent_id_terminated])
+                # # Add the Trajectory and the last experience to the buffer
+                # buffer.extend(dict_trajectories_from_agent.pop(agent_id_terminated))
+                # buffer.append(last_experience)
+                dict_trajectories_from_agent[agent_id_terminated].append(last_experience)
+                while len(dict_trajectories_from_agent[agent_id_terminated]) > 0:
+                    yield tuple(dict_trajectories_from_agent[agent_id_terminated])
+                    dict_trajectories_from_agent[agent_id_terminated].popleft()
+                dict_cumulative_reward_from_agent[agent_id_terminated] = 0
+                dict_cumulative_steps_from_agent[agent_id_terminated] = 0
+            # For all Agents with a Decision Step:
+            for agent_id_decisions in decision_steps:
+                # print('ds', agent_id_decisions)
+                # If the Agent does not have a Trajectory, create an empty one
+                if agent_id_decisions not in dict_trajectories_from_agent:
+                # if len(dict_trajectories_from_agent[agent_id_decisions]) == 0:
+                    dict_trajectories_from_agent[agent_id_decisions] = Deque(maxlen=self.steps_count)
+                    dict_cumulative_steps_from_agent[agent_id_decisions] = 0
+                    dict_cumulative_reward_from_agent[agent_id_decisions] = 0
+
+                # If the Agent requesting a decision has a "last observation"
+                if agent_id_decisions in dict_last_obs_from_agent:
+                # Create an Experience from the last observation and the Decision Step
+                    exp = Experience(
+                        state=dict_last_obs_from_agent[agent_id_decisions].copy(),
+                        reward=decision_steps[agent_id_decisions].reward,
+                        done=False,
+                        action=dict_last_action_from_agent[agent_id_decisions].copy(),
+                        # next_obs=decision_steps[agent_id_decisions].obs[0],
+                    )
+                    # Update the Trajectory of the Agent and its cumulative reward
+                    dict_trajectories_from_agent[agent_id_decisions].append(exp)
+                    dict_cumulative_reward_from_agent[agent_id_decisions] += (
+                        decision_steps[agent_id_decisions].reward
+                        )
+                    if (len(dict_trajectories_from_agent[agent_id]) == self.steps_count) and iter_idx % self.steps_delta == 0:
+                        yield tuple(dict_trajectories_from_agent[agent_id])
+                # Store the observation as the new "last observation"
+                dict_last_obs_from_agent[agent_id_decisions] = (
+                    decision_steps[agent_id_decisions].obs[0]
+                    )
+            
+            # Generate an action for all the Agents that requested a decision
+            states = decision_steps.obs[0]
+            # print(states)
+            actions, _ = self.agent(states, states)
+            # Store the action that was picked, it will be put in the trajectory later
+            for agent_index, agent_id in enumerate(decision_steps.agent_id):
+                dict_last_action_from_agent[agent_id] = actions[agent_index]
+                dict_cumulative_steps_from_agent[agent_id] += 1
+
+            decision_steps, terminal_steps = env.step(actions)
+            # # Set the actions in the environment
+            # # Unity Environments expect ActionTuple instances.
+            # action_tuple = ActionTuple()
+            # action_tuple.add_continuous(actions)
+            # env.set_actions(behavior_name, action_tuple)
+            # # Perform a step in the simulation
+            # env.step()
+            iter_idx += 1
 
 # those entries are emitted from ExperienceSourceFirstLast. Reward is discounted over the trajectory piece
 ExperienceFirstLast = collections.namedtuple('ExperienceFirstLast', ('state', 'action', 'reward', 'last_state'))
@@ -190,6 +302,27 @@ class ExperienceSourceFirstLast(ExperienceSource):
             yield ExperienceFirstLast(state=exp[0].state, action=exp[0].action,
                                       reward=total_reward, last_state=last_state)
 
+class UnityExperienceSourceFirstLast (UnityExperienceSource):
+    def __init__(self, env, agent, gamma, steps_count=1, steps_delta=1):
+        assert isinstance(gamma, float)
+        super(UnityExperienceSourceFirstLast, self).__init__(env, agent, steps_count+1, steps_delta)
+        self.gamma = gamma
+        self.steps = steps_count
+
+    def __iter__(self):
+        for exp in super(UnityExperienceSourceFirstLast, self).__iter__():
+            if exp[-1].done and len(exp) <= self.steps:
+                last_state = None
+                elems = exp
+            else:
+                last_state = exp[-1].state
+                elems = exp[:-1]
+            total_reward = 0.0
+            for e in reversed(elems):
+                total_reward *= self.gamma
+                total_reward += e.reward
+            yield ExperienceFirstLast(state=exp[0].state, action=exp[0].action,
+                                      reward=total_reward, last_state=last_state)
 
 def discount_with_dones(rewards, dones, gamma):
     discounted = []
